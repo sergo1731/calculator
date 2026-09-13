@@ -318,7 +318,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<script async src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 <script>
 /* ============ Инициализация ============ */
 try { if (window.vkBridge) vkBridge.send('VKWebAppInit'); } catch(e) {}
@@ -368,7 +368,8 @@ goalSel.addEventListener('change', () => {
     (goalSel.value === 'lose' && document.getElementById('results').classList.contains('show')) ? '' : 'none';
 });
 
-const profile = load('wp_profile', null);
+let profile = null;
+try { profile = load('wp_profile', null); } catch(e) {}
 if (profile) {
   document.getElementById('age').value = profile.age || '';
   document.getElementById('height').value = profile.height || '';
@@ -732,9 +733,11 @@ function renderFood(){
     const pct = Math.min(100, sumK / goal * 100);
     document.getElementById('kcalBar').style.width = pct + '%';
     const left = goal - sumK;
-    document.getElementById('kcalHint').textContent = left >= 0
-      ? 'Осталось ' + Math.round(left) + ' ккал на сегодня' + (pct > 100 ? '' : ' (' + Math.round(pct) + '% съедено)');
-    if (left < 0) document.getElementById('kcalHint').textContent = '⚠️ Перебор на ' + Math.round(-left) + ' ккал';
+    if (left >= 0) {
+      document.getElementById('kcalHint').textContent = 'Осталось ' + Math.round(left) + ' ккал на сегодня (' + Math.round(pct) + '% съедено)';
+    } else {
+      document.getElementById('kcalHint').textContent = '⚠️ Перебор на ' + Math.round(-left) + ' ккал';
+    }
   } else {
     document.getElementById('kcalBar').style.width = '0%';
     document.getElementById('kcalHint').textContent = 'Сначала рассчитайте норму калорий на вкладке «Калькулятор».';
