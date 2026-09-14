@@ -318,13 +318,50 @@
 
 <div class="toast" id="toast"></div>
 
-<script async src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<script async src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@vkontakte/vk-bridge/dist/browser.min.js';document.head.appendChild(s);})()"></script>
+<script>
+/* Мини-мост VK Bridge: работает без внешних скриптов.
+   Если официальный vk-bridge догрузится с CDN — он заменит этот объект. */
+(function(){
+  if (window.vkBridge && window.vkBridge.send) return;
+  var pending = {}, counter = 0;
+  var bridge = {
+    send: function(method, props){
+      props = props || {};
+      return new Promise(function(resolve, reject){
+        var id = ++counter;
+        pending[id] = {resolve: resolve, reject: reject};
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({handler: method, params: props, type: 'vk-connect', id: id}, '*');
+          } else { throw 0; }
+        } catch(e){ delete pending[id]; reject(new Error('Вне VK')); return; }
+        setTimeout(function(){
+          if (pending[id]) { delete pending[id]; reject(new Error('VK не ответил')); }
+        }, 5000);
+      });
+    },
+    subscribe: function(){},
+    unsubscribe: function(){},
+    supports: function(){ return true; }
+  };
+  window.addEventListener('message', function(ev){
+    var d = ev.data || {};
+    if (d.id == null) return;
+    var p = pending[d.id];
+    if (p) { delete pending[d.id]; if (d.error) p.reject(d.error); else p.resolve(d.response); }
+  });
+  window.vkBridge = bridge;
+})();
+</script>
 <script>
 /* ============ Инициализация ============ */
 try { if (window.vkBridge) vkBridge.send('VKWebAppInit'); } catch(e) {}
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(function(){});
-}
+try {
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  }
+} catch(e) {}
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -651,27 +688,115 @@ function drawChart(){
 }
 
 /* ============ Дневник питания ============ */
-const FOOD_DB = [
-  ['Куриная грудка',165,31,3.6,0],['Куриное бедро',209,17,14,0],['Индейка',135,29,1.7,0],
-  ['Говядина',250,26,15,0],['Лосось',208,20,13,0],['Тунец (консерв.)',116,26,1,0],
-  ['Яйцо (1 шт ≈ 55 г)',155,13,11,1],['Творог 5%',120,17,5,1.8],['Творог 0%',85,18,0.3,3],
-  ['Молоко 2,5%',52,2.8,2.5,4.7],['Кефир 1%',40,3,1,4],['Греческий йогурт',59,10,0.4,3.6],
-  ['Овсянка',350,13,7,60],['Гречка',343,13,3.4,68],['Рис белый',330,7,1,74],
-  ['Макароны',350,12,1.5,70],['Перловка',320,9.5,1,74],['Хлеб ржаной',210,6.5,1.2,41],
-  ['Картофель',77,2,0.4,17],['Яблоко',52,0.3,0.2,14],['Банан',89,1.1,0.3,23],
-  ['Апельсин',47,0.9,0.1,12],['Огурец',15,0.8,0.1,2.8],['Помидор',18,0.9,0.2,3.9],
-  ['Капуста',27,1.3,0.1,5],['Орехи грецкие',654,15,65,14],['Мёд',304,0.3,0,82],
-  ['Сахар',387,0,0,100],['Подсолнечное масло',884,0,100,0],['Чёрный шоколад',546,4.9,31,61]
+const FOOD_GROUPS = [
+  ['🥤 Напитки', [
+    ['Кофе чёрный (без сахара)',2,0.1,0,0.3],['Чай чёрный/зелёный (без сахара)',1,0,0,0.2],
+    ['Чай с сахаром (2 ч.л.)',32,0,0,8],['Какао с молоком',80,3,2,12],
+    ['Апельсиновый сок',45,0.7,0.2,10.4],['Кола',42,0,0,10.6],
+    ['Пиво 4–5%',45,0.5,0,3.6],['Вино сухое',80,0.2,0,2.6],
+    ['Сгущённое молоко',320,7.2,8.5,56]
+  ]],
+  ['🧂 Специи и соусы', [
+    ['Сахар',387,0,0,100],['Соль',0,0,0,0],['Мёд',304,0.3,0,82],
+    ['Майонез',629,2.4,67,2.6],['Кетчуп',100,1.8,1,22.8],
+    ['Сметана 20%',206,2.8,20,3.6],['Масло сливочное',748,0.5,82.5,0.8],
+    ['Подсолнечное масло',884,0,100,0],['Соевый соус',53,5,0.1,9]
+  ]],
+  ['🥛 Молочные', [
+    ['Творог 5%',120,17,5,1.8],['Творог 0%',85,18,0.3,3],
+    ['Молоко 2,5%',52,2.8,2.5,4.7],['Молоко 3,2%',60,2.9,3.2,4.7],
+    ['Кефир 1%',40,3,1,4],['Греческий йогурт',59,10,0.4,3.6],
+    ['Ряженка 2,5%',54,2.9,2.5,4.2],['Сыр твёрдый',402,25,33,1.3],
+    ['Сыр плавленый',290,16,22,4]
+  ]],
+  ['🍖 Мясо, рыба, яйца', [
+    ['Куриная грудка',165,31,3.6,0],['Куриное бедро',209,17,14,0],
+    ['Индейка',135,29,1.7,0],['Говядина',250,26,15,0],
+    ['Свинина',263,16.5,21.5,0],['Фарш куриный',143,17,8,1],
+    ['Лосось',208,20,13,0],['Тунец (консерв.)',116,26,1,0],
+    ['Сельдь',217,17.5,16,0],['Скумбрия',191,18,13.2,0],
+    ['Треска',82,17.5,0.7,0],['Креветки',87,18,1,0.8],
+    ['Крабовые палочки',73,6,1,12],['Колбаса докторская',257,13.7,22.8,1.5],
+    ['Сосиски',160,12,13,1],['Яйцо (1 шт ≈ 55 г)',155,13,11,1],
+    ['Белок яичный',44,11,0.2,0.7]
+  ]],
+  ['🌾 Крупы и бобовые', [
+    ['Овсянка',350,13,7,60],['Гречка',343,13,3.4,68],
+    ['Рис белый',330,7,1,74],['Макароны',350,12,1.5,70],
+    ['Перловка',320,9.5,1,74],['Манка',328,10.3,1,73.3],
+    ['Пшено',348,11.7,3,69.9],['Кукурузные хлопья',363,7.5,1,84],
+    ['Чечевица',350,25,1.5,60],['Фасоль',298,21.5,1.5,54],
+    ['Горох',298,20.5,2,49]
+  ]],
+  ['🥬 Овощи и зелень', [
+    ['Картофель',77,2,0.4,17],['Огурец',15,0.8,0.1,2.8],
+    ['Помидор',18,0.9,0.2,3.9],['Капуста',27,1.3,0.1,5],
+    ['Свёкла',42,1.5,0.1,8.8],['Морковь',35,1.3,0.1,6.9],
+    ['Лук репчатый',40,1.1,0.1,9.1],['Чеснок',149,6.5,0.5,33],
+    ['Перец болгарский',27,1.3,0.3,5.3],['Кабачок',24,0.6,0.3,4.6],
+    ['Баклажан',24,1.2,0.2,4.5],['Шампиньоны',27,4.3,1,0.1],
+    ['Зелень (укроп/петрушка)',36,3.5,0.4,7.6]
+  ]],
+  ['🍎 Фрукты и ягоды', [
+    ['Яблоко',52,0.3,0.2,14],['Банан',89,1.1,0.3,23],
+    ['Апельсин',47,0.9,0.1,12],['Груша',57,0.4,0.1,15.2],
+    ['Киви',61,1.1,0.5,14.7],['Виноград',69,0.7,0.2,18.1],
+    ['Клубника',32,0.7,0.3,7.7],['Малина',52,1.2,0.7,11.9],
+    ['Вишня',52,1,0.3,12],['Слива',46,0.7,0.3,11.4],
+    ['Арбуз',30,0.6,0.2,7.6],['Дыня',34,0.8,0.2,8.2],
+    ['Персик',43,0.9,0.3,11.1],['Абрикос',48,1.4,0.4,11],
+    ['Лимон',34,1.1,0.3,6.9],['Изюм',299,3.1,0.5,79],
+    ['Чернослив',231,2.2,0.7,57.5],['Курага',241,5.2,0.3,62.6]
+  ]],
+  ['🥜 Орехи и семена', [
+    ['Орехи грецкие',654,15,65,14],['Семечки подсолнечника',578,20.7,52.9,20],
+    ['Арахис',567,25.8,49.2,16.1],['Миндаль',579,21.2,49.9,21.6],
+    ['Кешью',553,18.2,43.8,30.2]
+  ]],
+  ['🍰 Сладкое', [
+    ['Чёрный шоколад',546,4.9,31,61],['Шоколад молочный',535,8,30,59],
+    ['Печенье сдобное',450,7,15,70],['Торт',396,4.7,20,50],
+    ['Мороженое пломбир',227,3.7,15,20.5],['Зефир',326,0.8,0.1,80],
+    ['Варенье',263,0.3,0.2,68.4]
+  ]],
+  ['🍞 Хлеб и выпечка', [
+    ['Хлеб ржаной',210,6.5,1.2,41],['Хлеб белый',246,8.1,1,48.8],
+    ['Булочка сдобная',301,7.6,4.7,55],['Батон',261,7.5,2.8,50]
+  ]]
 ];
 let customFoods = load('wp_customfoods', []);
 let foodLog = load('wp_food', {}); // {date: [{name, grams, kcal, p, f, c}]}
 
-function allFoods(){ return FOOD_DB.concat(customFoods); }
+function foodList(){
+  var a = [];
+  FOOD_GROUPS.forEach(function(g){ g[1].forEach(function(f){ a.push(f); }); });
+  customFoods.forEach(function(f){ a.push(f); });
+  return a;
+}
 
 function fillFoodSelect(){
-  const sel = document.getElementById('fProduct');
-  sel.innerHTML = allFoods().map((f,i) =>
-    '<option value="' + i + '">' + f[0] + ' (' + f[1] + ' ккал/100г)</option>').join('');
+  var sel = document.getElementById('fProduct');
+  var fl = foodList();
+  var pos = 0, html = '';
+  FOOD_GROUPS.forEach(function(g){
+    html += '<optgroup label="' + g[0] + '">';
+    g[1].forEach(function(){
+      var f = fl[pos];
+      html += '<option value="' + pos + '">' + f[0] + ' (' + f[1] + ' ккал/100г)</option>';
+      pos++;
+    });
+    html += '</optgroup>';
+  });
+  if (customFoods.length) {
+    html += '<optgroup label="⭐ Мои продукты">';
+    customFoods.forEach(function(){
+      var f = fl[pos];
+      html += '<option value="' + pos + '">' + f[0] + ' (' + f[1] + ' ккал/100г)</option>';
+      pos++;
+    });
+    html += '</optgroup>';
+  }
+  sel.innerHTML = html;
 }
 fillFoodSelect();
 document.getElementById('fDate').value = today();
@@ -682,7 +807,7 @@ document.getElementById('addFoodBtn').addEventListener('click', () => {
   const grams = +document.getElementById('fGrams').value;
   const date = document.getElementById('fDate').value;
   if (!grams || grams < 1 || !date) { toast('Укажите продукт и граммы'); return; }
-  const f = allFoods()[idx];
+  const f = foodList()[idx];
   const k = grams / 100;
   const item = {name: f[0], grams: grams,
     kcal: Math.round(f[1]*k*10)/10, p: Math.round(f[2]*k*10)/10,
@@ -806,7 +931,7 @@ document.getElementById('shareDiaryBtn').addEventListener('click', async () => {
 
 document.getElementById('resetAllBtn').addEventListener('click', () => {
   if (!confirm('Удалить ВСЕ данные (дневники, питание, вода, профиль)? Это действие необратимо.')) return;
-  ['wp_profile','wp_diary','wp_food','wp_water','wp_customfoods','wp_lastcalc'].forEach(k => localStorage.removeItem(k));
+  ['wp_profile','wp_diary','wp_food','wp_water','wp_customfoods','wp_lastcalc'].forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
   location.reload();
 });
 </script>
